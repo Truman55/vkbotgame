@@ -37,3 +37,4 @@ botReadyChecker().then((bot) => {
     app.post('/', bot.webhookCallback);
     app.listen(8888);
 })
+
