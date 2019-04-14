@@ -1,21 +1,20 @@
 const express = require('express');
+const firebase = require("firebase");
 const bodyParser = require('body-parser');
-const { botConfig, fireBaseConfig } = require('./config');
-const VkBotApp = require('./modules/App');
+
+const Bot = require('./modules/Bot');
 const Commands = require('./modules/Commands');
 const DataBase = require('./modules/DataBase');
-
-const firebase = require("firebase");
+const { botConfig, fireBaseConfig } = require('./config');
+const { accessToken, confirmation, secret } = botConfig;
 
 // init app
 const app = express();
 app.use(bodyParser());
 
-const { accessToken, confirmation, secret } = botConfig;
-
 const botReadyChecker = () => new Promise((resolve, reject) => {
     try {
-        const bot = new VkBotApp({ accessToken, confirmation, secret });
+        const bot = new Bot({ accessToken, confirmation, secret });
 
         const waitingFor = setInterval(() => {
             const ctx = bot.context;
@@ -29,12 +28,14 @@ const botReadyChecker = () => new Promise((resolve, reject) => {
     }
 })
 
-botReadyChecker().then((bot) => {
+const appStart = async () => {
+    const bot = await botReadyChecker();
     firebase.initializeApp(fireBaseConfig);
 
-    const dataBase = new DataBase(firebase);
-    const commands = new Commands(bot, dataBase, accessToken);
+    const db = new DataBase(firebase);
+    new Commands(bot, db, accessToken);
     app.post('/', bot.webhookCallback);
     app.listen(8888);
-})
+};
 
+appStart();

@@ -1,10 +1,21 @@
 const shuffle = require('lodash.shuffle');
-const groupBy = require('lodash.groupby');
 const sortBy = require('lodash.sortby');
 const moment = require('moment');
+const DataBase = require('./DataBase');
+const VKBot = require('node-vk-bot-api');
+const text = require('../text/text');
 moment.locale('ru');
 
+/**
+ * Команды бота
+ * @class 
+ */
 class Commands {
+    /**
+     * @param {VKBot} bot 
+     * @param {DataBase} database 
+     * @param {string} accessToken 
+     */
     constructor (bot, database, accessToken) {
         this.bot = bot;
         this.accessToken = accessToken;
@@ -23,32 +34,44 @@ class Commands {
             console.log('MESSAGE ', ctx.message);
         })
     }
+    
+    /**
+     * Устанавливает действия бота при определенной команде
+     * @param {string} command
+     * @param {Function} cb
+     */
+    setCommand (command, cb) {
+        this.bot.command(command, async (ctx) => await cb(ctx));
+    }
 
+    /**
+     * Запускает игру в беседе (регистрация)
+     */
     gameStartHandler () {
-        const self = this;
-        this.bot.command('/start', (ctx) => {
-            const groupId = ctx.message.peer_id;
+        this.setCommand('/start', async (ctx) => {
+            const groupId = this.groupID(ctx);
+            const groupsSnapshot = await this.database.checkGroup(groupId);
+            const groupIsExist = groupsSnapshot.val() && groupsSnapshot.val().registered;
 
-            this.database.checkGroup(groupId).then((snapshot) => {
-                const groupIsExist = snapshot.val() && snapshot.val().registered;
+            if (!groupIsExist) {
+                this.database.regGroup(groupId);
+                ctx.reply(text.groupRegistered);
+                return;
+            }
 
-                if (groupIsExist) {
-                    ctx.reply('Беседа уже в игре! Для регистрации в ежедневном определении пидора напиши /pidorReg');
-                    return;
-                }
-
-                self.database.regGroup(groupId);
-                ctx.reply('☠☠☠ Игра "Пидор дня" запущена ☠☠☠');
-            });;
+            ctx.reply(text.groupExist);
         })
     }
 
+    /**
+     * Строит таблицу лидеров
+     */
     total () {
-        this.bot.command('/pidorStats', async (ctx) => {
-            const groupId = ctx.message.peer_id;
+        this.setCommand('/pidorStats', async (ctx) => {
+            const groupId = this.groupID(ctx);
             const usersSnapshot = await this.database.getAllUsers(groupId);
-            const users = usersSnapshot.val();
 
+            const users = usersSnapshot.val();
             const data = Object.keys(users).map(key => {
                 return users[key];
             })
@@ -57,7 +80,26 @@ class Commands {
             let message = '';
             
             sortedData.forEach((item, index) => {
-                message += `${index + 1}. ${item.userName} ❤ ${item.pidorCount} ❤\n`;
+                if (index === 0) {
+                    message += `
+                        1⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
+                    return;
+                }
+
+                if (index === 1) {
+                    message += `
+                        2⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
+                    return;
+                }
+
+                if (index === 2) {
+                    message += `
+                        3⃣ ${item.userName} 👉 ${item.pidorCount}\n\n
+                    ========================================\n`;
+                    return;
+                }
+
+                message += `${index + 1}. ${item.userName} 👉 ${item.pidorCount}\n`;
             })
 
             ctx.reply('ТУРНИРНАЯ ТАБЛИЦА');
@@ -66,9 +108,9 @@ class Commands {
     }
 
     userGameRegistration () {
-        this.bot.command('/pidorReg', async (ctx) => {
+        this.setCommand('/pidorReg', async (ctx) => {
             const userId = ctx.message.from_id;
-            const groupId = ctx.message.peer_id;
+            const groupId = this.database(ctx);
 
             const snapshotGroup = await this.database.checkGroup(groupId);
             const groupIsExist = snapshotGroup.val() && snapshotGroup.val().registered;
@@ -107,7 +149,7 @@ class Commands {
     }
 
     help () {
-        this.bot.command('/help', async (ctx) => {
+        this.setCommand('/help', async (ctx) => {
             const message = `
                 👨‍❤️‍💋‍👨 Команды игры "Пидор дня" 👨‍❤️‍💋‍👨
                 
@@ -124,8 +166,8 @@ class Commands {
     }
 
     searchPidor () {
-        this.bot.command('/pidor', async (ctx) => {
-            const groupId = ctx.message.peer_id;
+        this.setCommand('/pidor', async (ctx) => {
+            const groupId = this.groupID(ctx);
 
             const checkGroup = await this.database.checkGroup(groupId);
             const groupIsExist = checkGroup.val() && checkGroup.val().registered;
@@ -155,23 +197,87 @@ class Commands {
             const usersIds = Object.keys(users);
             const [pidorOfDayId] = shuffle(usersIds);
 
-            ctx.reply('🚑 🚑 🚑 АКТИВИРОВАН ПОИСК ПИДОРА 🚑 🚑 🚑');
+            const weekday = moment().weekday();
+            const messagesArray = answers[weekday];
+            const [todayMessage] = shuffle(messagesArray);
 
-            setTimeout(() => {
-                ctx.reply('👓 👓ИЩЕМ ПИДОРА 👓 👓')
-            }, 2000);
-
-            setTimeout(() => {
-                ctx.reply('🕵️‍♂🕵️‍♂🕵️‍♂ ПИДОР ТЫ ГДЕ??? 🕵️‍♂🕵️‍♂🕵️‍♂');
-            }, 4000);
+            let timeout = 0;
+            todayMessage.forEach((msg) => {
+                this.msg(ctx, msg, timeout+= 2000)
+            });
 
             setTimeout(() => {
                 const pidor = users[pidorOfDayId];
                 this.database.saveResult(pidor.pidorCount + 1, pidorOfDayId, groupId, pidor.userName);
                 ctx.reply(`ПИДОР ДНЯ: 🐔 🐔 ${pidor.userName} @${pidor.screenName} 🐔 🐔`);
-            }, 6000);
+            }, timeout+= 2000);
         })
+    }
+
+    msg (ctx, msg, timeout) {
+        setTimeout(() => {
+            ctx.reply(msg)
+        }, timeout);
+    }
+
+    groupID (ctx) {
+        return ctx.message.peer_id;
     }
 }
 
+const defMessage = [
+    'Да как вы заебали со своими пидорами...',
+    '📖 книгу бы лучше почитали...',
+    '👓 👓 Я ТУТ ЧИТАЛ ОДНУ КНИГУ, И В НЕЙ БЫЛО НАПИСАНО 👓 👓'
+]
+
+const answers = {
+    0: [
+        [
+            'Понедельник день тяжелый...Так что пидоров вокруг очень много',
+            '👓 👓 ХОТЯ НУ КА НУ КА 👓 👓',
+            '🕵️‍♂🕵️‍♂🕵️‍♂ МНЕ КАЖЕТСЯ Я ЧТО ТО ВИЖУ 🕵️‍♂🕵️‍♂🕵️‍♂',
+            'АГА. ПОПАЛСЯ!'
+        ]
+    ],
+    1: [
+        [
+            'Если к пиву добавить немного водки и хорошей компании, то даже вторник может превратиться в пятницу',
+            'Только бы пидоров рядом не было...',
+            '👓 👓 БЛЯЯЯЯ....Я ЧТО-ТО ВИЖУ 👓 👓'
+        ]
+    ],
+    2: [
+        [
+            'Кто-то сказал, что среда - это маленькая пятница',
+            'Но никто не сказал, кто же сегодня будет пидором дня',
+            '🕵️‍♂🕵️‍♂🕵️‍♂ ПОЖАЛУЙ ВОЗЬМУ ЭТУ РОЛЬ НА СЕБЯ 🕵️‍♂🕵️‍♂🕵️‍♂',
+        ]
+    ],
+    3: [
+        [
+            'Кого бы я не выбрал сегодня, знайте - один раз не пидорас. А вот если 2, я бы задумался',
+            '🚀🚀 СТАРТУЕМ!!!',
+            '👓 👓 ПЯТЬ СЕКУНД, ПОЛЕТ НОРМАЛЬНЫЙ 👓 👓'
+        ]
+    ],
+    4: [
+        [
+            ...defMessage
+        ]
+    ],
+    5: [
+        [
+            ...defMessage
+        ]
+    ],
+    6: [
+        [
+            ...defMessage
+        ]
+    ]
+
+}
+
 module.exports = Commands;
+
