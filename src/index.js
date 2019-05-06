@@ -2,11 +2,18 @@ const express = require('express');
 const firebase = require("firebase");
 const bodyParser = require('body-parser');
 
+const server = require('./server');
 const Bot = require('./modules/Bot');
 const Commands = require('./modules/Commands');
 const DataBase = require('./modules/DataBase');
 const { botConfig, fireBaseConfig } = require('./config');
 const { accessToken, confirmation, secret } = botConfig;
+
+
+(async () => {
+    const serverUrl = await server();
+    console.log(serverUrl);
+})();
 
 // init app
 const app = express();
