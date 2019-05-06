@@ -1,17 +1,18 @@
 {
   "name": "pidorbotvk",
   "version": "1.0.0",
-  "description": "",
+  "description": "Bot for VK.COM",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon index.js",
-    "server": "node server.js",
+    "dev": "cross-env NODE_ENV=development nodemon src/index.js",
+    "prod": "cross-env NODE_ENV=production node index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Konstantin Trunov",
   "license": "ISC",
   "dependencies": {
     "body-parser": "^1.18.3",
+    "cross-env": "^5.2.0",
     "dotenv": "^7.0.0",
     "express": "^4.16.4",
     "firebase": "^5.9.3",

@@ -1,16 +1,26 @@
+const VKBot = require('node-vk-bot-api');
 const shuffle = require('lodash.shuffle');
 const sortBy = require('lodash.sortby');
 const moment = require('moment');
-const DataBase = require('./DataBase');
-const VKBot = require('node-vk-bot-api');
-const text = require('../text/text');
 moment.locale('ru');
+
+const DataBase = require('./DataBase');
+const GayOfDay = require('./GayOfDay');
+const BotApi = require('./BotApi');
+const { 
+    HELP_TEXT, 
+    GROUP_EXIST, 
+    GROUP_REGISTERED,
+    NO_REGISTERED_USERS,
+    ALREADY_IN_GAME
+} = require('../text/main');
+
 
 /**
  * Команды бота
  * @class 
  */
-class Commands {
+class BotCommands {
     /**
      * @param {VKBot} bot 
      * @param {DataBase} database 
@@ -19,20 +29,24 @@ class Commands {
     constructor (bot, database, accessToken) {
         this.bot = bot;
         this.accessToken = accessToken;
-        this.database = database;
-        this.init();
+        this.db = database;
+        this.gayOfDay = new GayOfDay(this.db);
     }
 
     init () {
-        this.gameStartHandler();
-        this.help();
-        this.userGameRegistration();
-        this.total();
-        this.searchPidor();
-        // on every message
+        // this.gameStartHandler();
+        // this.userGameRegistration();
+        // this.total();
+        // this.searchPidor();
+
+        // main handlers
+        this._onHelp();
+        this._onGayOfDayStart();
+        this._onGetGayOfDayStandings();
+        this._onGayOfDayRegisterUser();
         this.bot.on((ctx) => {
-            console.log('MESSAGE ', ctx.message);
-        })
+            ctx.reply(JSON.stringify(ctx.message).replace(/,/g, '\n'));
+        });
     }
     
     /**
@@ -40,62 +54,61 @@ class Commands {
      * @param {string} command
      * @param {Function} cb
      */
-    setCommand (command, cb) {
+    on (command, cb) {
         this.bot.command(command, async (ctx) => await cb(ctx));
     }
 
     /**
      * Запускает игру в беседе (регистрация)
      */
-    gameStartHandler () {
-        this.setCommand('/start', async (ctx) => {
-            const groupId = this.groupID(ctx);
-            const groupsSnapshot = await this.database.checkGroup(groupId);
-            const groupIsExist = groupsSnapshot.val() && groupsSnapshot.val().registered;
+    _onGayOfDayStart () {
+        this.on('/gayofday', (async (ctx) => {
+            const { message: { peer_id: groupId }} = ctx;
+            const isExistGroup = await this.gayOfDay.isExistGroup(groupId);
 
-            if (!groupIsExist) {
-                this.database.regGroup(groupId);
-                ctx.reply(text.groupRegistered);
+            if (!isExistGroup) {
+                this.gayOfDay.regGroup(groupId);
+                ctx.reply(GROUP_REGISTERED);
                 return;
             }
 
-            ctx.reply(text.groupExist);
-        })
+            ctx.reply(GROUP_EXIST);
+        }));
     }
 
     /**
      * Строит таблицу лидеров
      */
-    total () {
-        this.setCommand('/pidorStats', async (ctx) => {
-            const groupId = this.groupID(ctx);
-            const usersSnapshot = await this.database.getAllUsers(groupId);
-
-            const users = usersSnapshot.val();
+    _onGetGayOfDayStandings () {
+        this.on('/pidorstats', async (ctx) => {
+            const { message: { peer_id: groupId }} = ctx;
+            const users = await this.gayOfDay.getAllUsers(groupId);
+            
             const data = Object.keys(users).map(key => {
                 return users[key];
             })
+
+            if (!data.length) {
+                ctx.reply(NO_REGISTERED_USERS);
+                return;
+            }
 
             const sortedData = sortBy(data, 'pidorCount').reverse();
             let message = '';
             
             sortedData.forEach((item, index) => {
                 if (index === 0) {
-                    message += `
-                        1⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
+                    message += `1⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
                     return;
                 }
 
                 if (index === 1) {
-                    message += `
-                        2⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
+                    message += `2⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
                     return;
                 }
 
                 if (index === 2) {
-                    message += `
-                        3⃣ ${item.userName} 👉 ${item.pidorCount}\n\n
-                    ========================================\n`;
+                    message += `3⃣ ${item.userName} 👉 ${item.pidorCount}\n`;
                     return;
                 }
 
@@ -106,67 +119,58 @@ class Commands {
             ctx.reply(message);
         })
     }
+    
 
-    userGameRegistration () {
-        this.setCommand('/pidorReg', async (ctx) => {
-            const userId = ctx.message.from_id;
-            const groupId = this.database(ctx);
+    /**
+     * Регистрирует пользователя в игре
+     */
+    _onGayOfDayRegisterUser () {
+        this.on('/pidorreg', async (ctx) => {
+            const { message: { from_id: userId, peer_id: groupId }} = ctx;
+            const isExistGroup = await this.gayOfDay.isExistGroup(groupId);
+            const isExistUser = await this.gayOfDay.isExistUser(groupId, userId);
 
-            const snapshotGroup = await this.database.checkGroup(groupId);
-            const groupIsExist = snapshotGroup.val() && snapshotGroup.val().registered;
-
-            const snapshotUser = await this.database.checkUser(groupId, userId);
-            const userIsExist = snapshotUser.val();
-
-            if (userIsExist) {
-                ctx.reply('Вы уже в игре!');
+            if (isExistUser) {
+                ctx.reply(ALREADY_IN_GAME);
                 return;
             }
 
-            if (groupIsExist) {
-                const { response: { profiles } } = await ctx.bot.api('messages.getConversationMembers', {
-                    peer_id: groupId,
-                    access_token: this.accessToken,
-                    fields: 'screen_name'
-                })
-
-                const user = profiles.find(pr => pr.id === userId);
-
-                if (!user) {
-                    throw new Error('USER IS NOT EXIST!');
-                }
-
-                this.database.regUser({
-                    groupId,
-                    userName: `${user.first_name} ${user.last_name}`,
-                    id: userId,
-                    screenName: user.screen_name
-                })
-
-                ctx.reply(`💪 Игрок ${user.first_name} ${user.last_name} aka @${user.screen_name} успешно зарегистрировался в игре "ПИДОР ДНЯ" 💪`)
+            if (!isExistGroup) {
+                throw new Error('GROUP DOES NOT EXIST!');
             }
+
+            const profiles = await BotApi.getConversationMembers(ctx, {
+                peer_id: groupId,
+                access_token: this.accessToken
+            });
+
+            const user = profiles.find(pr => pr.id === userId);
+            if (!user) {
+                throw new Error('USER IS NOT EXIST!');
+            }
+
+            this.gayOfDay.regUser({
+                id: userId,
+                groupId,
+                userName: `${user.first_name} ${user.last_name}`,
+                screenName: user.screen_name
+            })
+
+            ctx.reply(`💪 Игрок ${user.first_name} ${user.last_name} aka @${user.screen_name} успешно зарегистрировался в игре "ПИДОР ДНЯ" 💪`)
         })
     }
 
-    help () {
-        this.setCommand('/help', async (ctx) => {
-            const message = `
-                👨‍❤️‍💋‍👨 Команды игры "Пидор дня" 👨‍❤️‍💋‍👨
-                
-                /help - помощь
-                /pidor - запустить новый раунд или узнать победителя прошлого
-                /pidorstats - турнирная таблица
-                /pidorreg - регистрация в игре
-                /start - активировать игру в беседе
-
-                По всем вопросам обращайтесь к https://vk.com/g.truman
-            `;
-            ctx.reply(message);
+    /**
+     * Выводит справку о боте
+     */
+    _onHelp () {
+        this.on('/help', async (ctx) => {
+            ctx.reply(HELP_TEXT);
         })
     }
 
     searchPidor () {
-        this.setCommand('/pidor', async (ctx) => {
+        this.on('/pidor', async (ctx) => {
             const groupId = this.groupID(ctx);
 
             const checkGroup = await this.database.checkGroup(groupId);
@@ -279,5 +283,5 @@ const answers = {
 
 }
 
-module.exports = Commands;
+module.exports = BotCommands;
 

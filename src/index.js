@@ -1,23 +1,25 @@
 const express = require('express');
-const firebase = require("firebase");
 const bodyParser = require('body-parser');
 
 const server = require('./server');
 const Bot = require('./modules/Bot');
-const Commands = require('./modules/Commands');
+const BotCommands = require('./modules/BotCommands');
 const DataBase = require('./modules/DataBase');
-const { botConfig, fireBaseConfig } = require('./config');
+const { botConfig } = require('./config');
 const { accessToken, confirmation, secret } = botConfig;
 
-
 (async () => {
-    const serverUrl = await server();
-    console.log(serverUrl);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log('WE ARE RUNNING NOT PRODUCTION VERSION');
+        return;
+    }
+
+    await server();
 })();
 
 // init app
 const app = express();
-app.use(bodyParser());
+app.use(bodyParser.json());
 
 const botReadyChecker = () => new Promise((resolve, reject) => {
     try {
@@ -37,12 +39,25 @@ const botReadyChecker = () => new Promise((resolve, reject) => {
 
 const appStart = async () => {
     const bot = await botReadyChecker();
-    firebase.initializeApp(fireBaseConfig);
+    const db = new DataBase();
 
-    const db = new DataBase(firebase);
-    new Commands(bot, db, accessToken);
-    app.post('/', bot.webhookCallback);
+    const botCommands = new BotCommands(bot, db, accessToken);
+    botCommands.init();
+
+    app.post('/', (...args) => {
+        const [req] = args;
+        if (req.body.type && req.body.type === 'message_new') {
+            console.log(req.body.object.text);
+        }
+
+        bot.webhookCallback(...args);
+    });
     app.listen(8888);
 };
 
-appStart();
+try {
+    appStart();
+} catch (error) {
+    console.log('APP START FAILED');
+    console.log(error);
+}

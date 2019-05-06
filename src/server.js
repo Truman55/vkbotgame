@@ -8,4 +8,8 @@ const server = (async () => {
     });
 });
 
+if (process.env.NODE_ENV !== 'production') {
+    server();
+}
+
 module.exports = server;
