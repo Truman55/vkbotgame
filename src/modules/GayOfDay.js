@@ -1,5 +1,8 @@
 
 const DataBase = require('./DataBase');
+const sortBy = require('lodash.sortby');
+const moment = require('moment');
+moment.locale('ru');
 
 class GayOfDay {
     /**
@@ -125,6 +128,28 @@ class GayOfDay {
     
         this.db.set(`/groups/${groupId}/users/${userID}/pidorCount`, pidorCount);
     }
+    
+    async getDataForFrontend (groupId) {
+        const now = moment(Date.now()).utcOffset('+0300');
+        const users = await this.getAllUsers(groupId);
+        const lastGame = await this.lastGame(groupId);
+        const lastGameDate = moment(lastGame.date).utcOffset('+0300');
+        const timeToReset = moment(now).add(1, 'day').startOf('day');
+
+        const data = Object.keys(users).map(key => {
+            return users[key];
+        })
+
+        const standings = sortBy(data, 'pidorCount').reverse();
+        return {
+            standings,
+            lastGameIsSame: lastGameDate.isSame(now, 'day'),
+            lastGameDateText: `${lastGameDate.format('D MMMM')} в ${lastGameDate.format('HH:mm')}`,
+            lastGameWinner: lastGame.winner,
+            timeToReset: moment().to(timeToReset)
+        }
+    }
+
 }
 
 module.exports = GayOfDay;

@@ -12,7 +12,9 @@ const {
     GROUP_EXIST, 
     GROUP_REGISTERED,
     NO_REGISTERED_USERS,
-    ALREADY_IN_GAME
+    ALREADY_IN_GAME,
+    GAME_NOT_STARTED,
+    ANSWERS
 } = require('../text/main');
 
 
@@ -24,25 +26,23 @@ class BotCommands {
     /**
      * @param {VKBot} bot 
      * @param {DataBase} database 
-     * @param {string} accessToken 
+     * @param {string} accessToken
+     * @param {GayOfDay} gayOfDay
      */
-    constructor (bot, database, accessToken) {
+    constructor (bot, database, accessToken, gayOfDay, server) {
         this.bot = bot;
         this.accessToken = accessToken;
         this.db = database;
-        this.gayOfDay = new GayOfDay(this.db);
+        this.gayOfDay = gayOfDay;
+        this.server = server;
     }
 
     init () {
-        // this.gameStartHandler();
-        // this.userGameRegistration();
-        // this.total();
-        // this.searchPidor();
-
         // main handlers
         this._onHelp();
         this._onGayOfDayStart();
         this._onGetGayOfDayStandings();
+        this._onSearchPidor();
         this._onGayOfDayRegisterUser();
         this.bot.on((ctx) => {
             ctx.reply(JSON.stringify(ctx.message).replace(/,/g, '\n'));
@@ -117,6 +117,7 @@ class BotCommands {
 
             ctx.reply('ТУРНИРНАЯ ТАБЛИЦА');
             ctx.reply(message);
+            ctx.reply(`Смотреть подробнее: ${this.server}/?group=${groupId}`);
         })
     }
     
@@ -139,7 +140,7 @@ class BotCommands {
                 throw new Error('GROUP DOES NOT EXIST!');
             }
 
-            const profiles = await BotApi.getConversationMembers(ctx, {
+            const profiles = await BotApi.getConversationMembers(ctx.bot.api, {
                 peer_id: groupId,
                 access_token: this.accessToken
             });
@@ -169,40 +170,43 @@ class BotCommands {
         })
     }
 
-    searchPidor () {
+    /**
+     * Поиск победителя
+     * 
+     */
+    _onSearchPidor () {
         this.on('/pidor', async (ctx) => {
             const groupId = this.groupID(ctx);
+            
 
-            const checkGroup = await this.database.checkGroup(groupId);
-            const groupIsExist = checkGroup.val() && checkGroup.val().registered;
+            const isExistGroup = await this.gayOfDay.isExistGroup(groupId);
 
-            if (!groupIsExist) {
-                ctx.reply('Игра "Пидор дня" не запущена в данной беседе. Для запуска напишите /start')
+            if (!isExistGroup) {
+                ctx.reply(GAME_NOT_STARTED)
                 return;
             }
 
-            const lastGame = await this.database.lastGame(groupId);
+            const lastGame = await this.gayOfDay.lastGame(groupId);
             
-            if (lastGame && lastGame.val()) {
-                const lastGameDate = moment(lastGame.val().date).utcOffset('+0300');
+            if (lastGame) {
+                const lastGameDate = moment(lastGame.date).utcOffset('+0300');
                 const now = moment(Date.now()).utcOffset('+0300');
 
                 if (lastGameDate.isSame(now, 'day')) {
                     const timeToReset = moment(now).add(1, 'day').startOf('day');
-                    ctx.reply(`Прошлая игры была ${lastGameDate.format('D MMMM')} в ${lastGameDate.format('HH:mm')} (МСК)`);
-                    ctx.reply(`Следующий раунд ${moment().to(timeToReset)}. Пидор дня в прошлой игре ${lastGame.val().winner}`)
+                    ctx.reply(`📢 [Пидор дня]: Прошлая игры была ${lastGameDate.format('D MMMM')} в ${lastGameDate.format('HH:mm')} (МСК)`);
+                    ctx.reply(`📢 [Пидор дня]: Следующий раунд ${moment().to(timeToReset)}. Пидор дня в прошлой игре ${lastGame.winner}`);
                     return;
                 }
             }
 
-            const usersSnapshot = await this.database.getAllUsers(groupId);
-            const users = usersSnapshot.val();
+            const users = await this.gayOfDay.getAllUsers(groupId);
 
             const usersIds = Object.keys(users);
             const [pidorOfDayId] = shuffle(usersIds);
 
             const weekday = moment().weekday();
-            const messagesArray = answers[weekday];
+            const messagesArray = ANSWERS[weekday];
             const [todayMessage] = shuffle(messagesArray);
 
             let timeout = 0;
@@ -212,8 +216,13 @@ class BotCommands {
 
             setTimeout(() => {
                 const pidor = users[pidorOfDayId];
-                this.database.saveResult(pidor.pidorCount + 1, pidorOfDayId, groupId, pidor.userName);
-                ctx.reply(`ПИДОР ДНЯ: 🐔 🐔 ${pidor.userName} @${pidor.screenName} 🐔 🐔`);
+
+                const pidorCount = pidor.pidorCount + 1;
+                const winnerName = pidor.userName;
+
+                this.gayOfDay.saveResult(pidorCount, pidorOfDayId, groupId, winnerName);
+
+                ctx.reply(`📢 [Пидор дня]: 🐔 🐔 ${pidor.userName} @${pidor.screenName} 🐔 🐔`);
             }, timeout+= 2000);
         })
     }
@@ -227,60 +236,6 @@ class BotCommands {
     groupID (ctx) {
         return ctx.message.peer_id;
     }
-}
-
-const defMessage = [
-    'Да как вы заебали со своими пидорами...',
-    '📖 книгу бы лучше почитали...',
-    '👓 👓 Я ТУТ ЧИТАЛ ОДНУ КНИГУ, И В НЕЙ БЫЛО НАПИСАНО 👓 👓'
-]
-
-const answers = {
-    0: [
-        [
-            'Понедельник день тяжелый...Так что пидоров вокруг очень много',
-            '👓 👓 ХОТЯ НУ КА НУ КА 👓 👓',
-            '🕵️‍♂🕵️‍♂🕵️‍♂ МНЕ КАЖЕТСЯ Я ЧТО ТО ВИЖУ 🕵️‍♂🕵️‍♂🕵️‍♂',
-            'АГА. ПОПАЛСЯ!'
-        ]
-    ],
-    1: [
-        [
-            'Если к пиву добавить немного водки и хорошей компании, то даже вторник может превратиться в пятницу',
-            'Только бы пидоров рядом не было...',
-            '👓 👓 БЛЯЯЯЯ....Я ЧТО-ТО ВИЖУ 👓 👓'
-        ]
-    ],
-    2: [
-        [
-            'Кто-то сказал, что среда - это маленькая пятница',
-            'Но никто не сказал, кто же сегодня будет пидором дня',
-            '🕵️‍♂🕵️‍♂🕵️‍♂ ПОЖАЛУЙ ВОЗЬМУ ЭТУ РОЛЬ НА СЕБЯ 🕵️‍♂🕵️‍♂🕵️‍♂',
-        ]
-    ],
-    3: [
-        [
-            'Кого бы я не выбрал сегодня, знайте - один раз не пидорас. А вот если 2, я бы задумался',
-            '🚀🚀 СТАРТУЕМ!!!',
-            '👓 👓 ПЯТЬ СЕКУНД, ПОЛЕТ НОРМАЛЬНЫЙ 👓 👓'
-        ]
-    ],
-    4: [
-        [
-            ...defMessage
-        ]
-    ],
-    5: [
-        [
-            ...defMessage
-        ]
-    ],
-    6: [
-        [
-            ...defMessage
-        ]
-    ]
-
 }
 
 module.exports = BotCommands;
