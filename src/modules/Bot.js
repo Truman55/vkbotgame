@@ -27,8 +27,6 @@ class Bot {
             confirmation: this.confirmation,
             secret: this.secret
         })
-
-        console.log('🚀🚀🚀 APP IS READY 🚀🚀🚀');
     }
 
     /**

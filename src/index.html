@@ -1,0 +1,188 @@
+ <!DOCTYPE html>
+ <html lang="en">
+ <head>
+     <meta charset="UTF-8">
+     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     <meta http-equiv="X-UA-Compatible" content="ie=edge">
+     <title>Статистика игры "Пидор дня"</title>
+     <style>
+        .lds-heart {
+            display: inline-block;
+            position: absolute;
+            width: 64px;
+            height: 64px;
+            transform: rotate(45deg);
+            transform-origin: 32px 32px;
+            top: 50%;
+            left: 50%;
+            margin-top: -32px;
+            margin-left: -32px;
+        }
+        .lds-heart div {
+            top: 23px;
+            left: 19px;
+            position: absolute;
+            width: 26px;
+            height: 26px;
+            background: lightcoral;
+            animation: lds-heart 1.2s infinite cubic-bezier(0.215, 0.61, 0.355, 1);
+            }
+        .lds-heart div:after,
+        .lds-heart div:before {
+            content: " ";
+            position: absolute;
+            display: block;
+            width: 26px;
+            height: 26px;
+            background: lightcoral;
+        }
+        .lds-heart div:before {
+            left: -17px;
+            border-radius: 50% 0 0 50%;
+        }
+            .lds-heart div:after {
+            top: -17px;
+            border-radius: 50% 50% 0 0;
+        }
+        @keyframes lds-heart {
+            0% {
+                transform: scale(0.95);
+            }
+            5% {
+                transform: scale(1.1);
+            }
+            39% {
+                transform: scale(0.85);
+            }
+            45% {
+                transform: scale(1);
+            }
+            60% {
+                transform: scale(0.95);
+            }
+            100% {
+                transform: scale(0.9);
+            }
+        }
+
+        .user-image {
+             width: 100px;
+             border-radius: 50%;
+        }
+
+        .user-photo {
+             position: relative;
+        }
+
+        .user-badge {
+            position: absolute;
+            bottom: 20px;
+            left: 60px;
+        }
+     </style>
+     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+ </head>
+ <body>
+     <div class="container" id="app">
+        <template v-if="appLoaded">
+            <h1>Статистика группы</h1>
+            <div class="alert alert-primary" role="alert">
+                <p> Прошлая игра была <b>{{lastGameDateText}}</b></p>
+                <p> Следующая игра: <b>{{ timeToReset }}</b></p>
+                <p> Победитель прошлой игры: <b>{{ lastGameWinner }}</b></p>
+            </div>
+
+            <h2>Таблица</h2>
+            <div class="table-responsive-md">
+                <table class="table table-dark table-hover">
+                    <thead>
+                    <tr>
+                        <th scope="col">Место</th>
+                        <th scope="col">Фото</th>
+                        <th scope="col">Никнейм</th>
+                        <th scope="col">Имя</th>
+                        <th scope="col">Очки</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="item, index in users">
+                        <th scope="row">{{ index + 1 }}</th>
+                        <td class="user-photo"><img class="user-image" :src="item.photo_200"><span v-if="index === 0" class="badge user-badge badge-pill badge-danger">Лидер!</span></td>
+                        <td>@{{ item.screenName }}</td>
+                        <td>{{ item.userName }}</td>
+                        <td>{{ item.pidorCount }}</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <button type="button" class="btn btn-success" @click="totem" v-if="!fakeTotemVisible">Купить тотем</button>
+                    <div class="totem" v-else>
+                        <div class="media">
+                            <img :src="fakeTotemVisible ? 'https://media.giphy.com/media/1CTTP1suOnOFy/giphy.gif' : null" class="mr-3" alt="">
+                            <div class="media-body">
+                                <h5 class="mt-0">Ага! Попался, пидорок? Боишься завтра проиграть?</h5>
+                                Я тебя запомнил ;)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template v-else>
+            <div class="lds-heart"><div></div></div>
+        </template>
+     </div>
+ </body>
+ <script>
+ function onVueLoaded () {
+    const app = new Vue({
+        el: '#app',
+        data: {
+            appLoaded: false,
+            lastGameDateText: null,
+            lastGameIsSame: null,
+            lastGameWinner: null,
+            timeToReset: null,
+            fakeTotemVisible: false,
+            users: null
+        },
+        methods: {
+            totem () {
+                this.fakeTotemVisible = true;
+            }
+        },
+        mounted () {
+            const matches = window.location.search.match(/group=(\d+)/);
+            if (!matches) {
+                return;
+            }
+
+            const groupID = matches[1];
+
+            fetch('/stats', {
+                method: 'POST',
+                body: JSON.stringify({ groupID }),
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }).then((res) => {
+                return res.json();
+            }).then((data) => {
+                const { standings, timeToReset, lastGameDateText, lastGameIsSame, lastGameWinner } = data;
+                this.users = standings;
+                this.lastGameIsSame = lastGameIsSame;
+                this.timeToReset = timeToReset;
+                this.lastGameWinner = lastGameWinner;
+                this.lastGameDateText = lastGameDateText
+                this.appLoaded = true;
+            });
+
+        }
+    })
+ }
+ </script>
+ <script src="https://ru.vuejs.org/js/vue.js" async onload="onVueLoaded()"></script>
+ </html>

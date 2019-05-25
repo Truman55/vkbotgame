@@ -8,4 +8,14 @@ const server = (async () => {
     });
 });
 
+if (process.env.NODE_ENV !== 'production') {
+    (async () => {
+        try {
+            await server();
+        } catch (e) {
+            console.log(e);
+        }
+    })();
+}
+
 module.exports = server;
