@@ -44,9 +44,12 @@ class BotCommands {
         this._onGetGayOfDayStandings();
         this._onSearchPidor();
         this._onGayOfDayRegisterUser();
-        this.bot.on((ctx) => {
-            ctx.reply(JSON.stringify(ctx.message).replace(/,/g, '\n'));
-        });
+
+        if (process.env.NODE_ENV !== 'production') {
+            this.bot.on((ctx) => {
+                ctx.reply(JSON.stringify(ctx.message).replace(/,/g, '\n'));
+            });
+        }
     }
     
     /**

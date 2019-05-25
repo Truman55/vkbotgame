@@ -33,7 +33,7 @@ const botReadyChecker = () => new Promise((resolve, reject) => {
 
         const waitingFor = setInterval(() => {
             const ctx = bot.context;
-            if (ctx) {
+            if (ctx && serverNgrok) {
                 clearInterval(waitingFor);
                 resolve(ctx);
             }
